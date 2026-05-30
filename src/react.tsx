@@ -88,14 +88,14 @@ export interface PictoProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 
   config?: CharInput
   /** Rendered size in px (width = height). Default 120. */
   size?: number
-  /** Include the background tile. Default true. */
+  /** Add a background tile behind the picto. Default false (transparent). */
   background?: boolean
   /** Play an animation declaratively. */
   animate?: AnimName
 }
 
 export const Picto = React.forwardRef<HTMLSpanElement, PictoProps>(function Picto(
-  { char, seed, config, size = 120, background = true, animate, style, ...rest },
+  { char, seed, config, size = 120, background = false, animate, style, ...rest },
   ref,
 ) {
   // stable, SSR-safe id prefix (no colons — they break url(#id) refs)

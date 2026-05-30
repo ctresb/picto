@@ -209,28 +209,39 @@ export function compose(a: ComposeArgs): string {
 export type Mode = 'mono' | 'hetero' | 'triad'
 export type EyeKind = 'single' | 'double' | 'triple'
 
+/**
+ * A constraint value. Three ways to use any field:
+ *  - omit it           -> fully random (picked from the seed)
+ *  - one value         -> locked to that value
+ *  - an array of values -> random, but only from that set (picked from the seed)
+ */
+export type OneOrMany<T> = T | readonly T[]
+
 export interface CharConfig {
   /** Explicit seed. Omit to derive a stable seed from the other fields. */
   seed?: number | string
-  /** Anchor color name, e.g. "blue". */
-  color?: string
-  /** Arbitrary body hue in degrees (overrides `color`). */
-  hue?: number
-  /** Explicit body gradient stops (override everything else). */
+  /**
+   * Body color. An anchor name ("blue"), OR a brand hex ("#19c37d") which gets a
+   * matching darker shade auto-generated. Array = pick one at random.
+   */
+  color?: OneOrMany<string>
+  /** Body hue in degrees. Array = pick one. Used when `color` is absent. */
+  hue?: OneOrMany<number>
+  /** Explicit gradient stops. Full manual lock, wins over color/hue. */
   light?: string
   dark?: string
-  /** Body shape, 1..4. */
-  shape?: number | string
-  /** Eye kind. */
-  eyes?: EyeKind
-  /** Exact eye file key, e.g. "double_2" (implies `eyes`). */
-  eye?: string
-  /** Exact eyebrow file key. */
-  brow?: string
-  /** Background, 1..5. */
-  bg?: number | string
-  /** Eye coloring mode. Invalid combos fall back to "mono". */
-  mode?: Mode
+  /** Body shape, 1..4. Array = pick one. */
+  shape?: OneOrMany<number | string>
+  /** Eye kind. Array = pick one. */
+  eyes?: OneOrMany<EyeKind>
+  /** Exact eye file key, e.g. "double_2" (implies `eyes`). Array = pick one. */
+  eye?: OneOrMany<string>
+  /** Exact eyebrow file key. Array = pick one. */
+  brow?: OneOrMany<string>
+  /** Background, 1..5. Array = pick one. */
+  bg?: OneOrMany<number | string>
+  /** Eye coloring mode. Array = pick one. Invalid combos fall back to "mono". */
+  mode?: OneOrMany<Mode>
   /** OKLCH fine-tuning overrides. */
   tuning?: Partial<Tuning>
   /** Generated-hue variety for seeded picks (default 8). */
@@ -258,48 +269,105 @@ function stableHash(cfg: CharConfig): number {
   return hashSeed(JSON.stringify(cfg))
 }
 
+const isHex = (s: string) => /^#?[0-9a-fA-F]{6}$/.test(s)
+
+// The anchor whose hue is closest to H, for borrowing a tasteful light->dark delta.
+function nearestAnchorByHue(H: number) {
+  return COLORS.map((c) => anchorOf(PARTS.bodies[c + '_' + SHAPES[0]])).reduce((m, x) =>
+    Math.abs(arc(x.p[2] - H)) < Math.abs(arc(m.p[2] - H)) ? x : m,
+  )
+}
+
+// Turn one brand hex into a {light, dark} gradient: the hex is the light stop, the
+// dark stop borrows the lightness/chroma/hue drop of the nearest artist color.
+function deriveGradient(hex: string): { light: string; dark: string } {
+  const light = hex[0] === '#' ? hex : '#' + hex
+  const [L, C, H] = hexToOklch(light)
+  const a = nearestAnchorByHue(H)
+  return { light, dark: oklchToHex(L + a.p[3], Math.max(0, C + a.p[4]), H + a.p[5]) }
+}
+
+/**
+ * Build a body gradient from a single brand color (hex) or a hue (degrees).
+ * Handy for inspecting or reusing what `color: '#hex'` would produce.
+ */
+export function gradient(input: string | number): { light: string; dark: string } {
+  return typeof input === 'number' ? hueEntry(input) : deriveGradient(input)
+}
+
 // Turn a seed, string, or config object into a concrete Resolved spec.
 // Provided fields win; everything else is filled deterministically from the seed.
 export function resolve(input: CharInput): Resolved {
   const cfg: CharConfig = typeof input === 'object' ? input : { seed: input }
   const seed = hashSeed(cfg.seed ?? (typeof input === 'object' ? stableHash(cfg) : 0))
   const rnd = mulberry32(seed)
-  const pick = <T,>(arr: T[]): T => arr[Math.floor(rnd() * arr.length)]
+  const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rnd() * arr.length)]
+  // resolve a constraint: undefined -> fallback (random), array -> pick from set, value -> locked
+  const pickOne = <T,>(v: OneOrMany<T> | undefined, fallback: () => T): T =>
+    v === undefined ? fallback() : Array.isArray(v) ? (v.length ? pick(v) : fallback()) : (v as T)
 
   const palette = buildPalette(COLORS, cfg.genHues ?? 8)
 
   // eye kind ("prefix") — weighted toward double, then triple, then single
   const weights: Record<string, number> = { single: 1, double: 9, triple: 4 }
-  const pool: string[] = []
+  const prefixPool: string[] = []
   PREFIXES.forEach((p) => {
-    for (let i = 0; i < (weights[p] || 0); i++) pool.push(p)
+    for (let i = 0; i < (weights[p] || 0); i++) prefixPool.push(p)
   })
-  let eyes = (cfg.eyes ?? (cfg.eye ? cfg.eye.split('_')[0] : pick(pool.length ? pool : PREFIXES))) as EyeKind
-  if (!EYE_FILES[eyes]) eyes = PREFIXES[0] as EyeKind
+  const pickPrefix = (): EyeKind => (prefixPool.length ? pick(prefixPool) : PREFIXES[0]) as EyeKind
 
-  const eye = cfg.eye && PARTS.eyes[cfg.eye] ? cfg.eye : pick(EYE_FILES[eyes])
-  const brow = cfg.brow && PARTS.eyebrows[cfg.brow] ? cfg.brow : pick(BROW_FILES[eyes])
-  const shape = SHAPES.includes(String(cfg.shape)) ? String(cfg.shape) : pick(SHAPES)
-  const bg = BGS.includes(String(cfg.bg)) ? String(cfg.bg) : pick(BGS)
+  // eyes / eye file / eyebrow (an exact `eye` decides the kind)
+  let eyes: EyeKind
+  let eye: string
+  if (cfg.eye !== undefined) {
+    eye = pickOne(cfg.eye, () => pick(EYE_FILES[pickPrefix()]))
+    if (!PARTS.eyes[eye]) eye = pick(EYE_FILES[pickPrefix()])
+    eyes = eye.split('_')[0] as EyeKind
+  } else {
+    eyes = pickOne(cfg.eyes, pickPrefix)
+    if (!EYE_FILES[eyes]) eyes = PREFIXES[0] as EyeKind
+    eye = pick(EYE_FILES[eyes])
+  }
+  let brow = pickOne(cfg.brow, () => pick(BROW_FILES[eyes]))
+  if (!PARTS.eyebrows[brow]) brow = pick(BROW_FILES[eyes])
 
-  // body palette
+  let shape = String(pickOne(cfg.shape, () => pick(SHAPES)))
+  if (!SHAPES.includes(shape)) shape = pick(SHAPES)
+  let bg = String(pickOne(cfg.bg, () => pick(BGS)))
+  if (!BGS.includes(bg)) bg = pick(BGS)
+
+  // body palette — manual stops win, then color (name or hex), then hue, then random
   let light: string
   let dark: string
   let colorName: string
   if (cfg.light && cfg.dark) {
     light = cfg.light
     dark = cfg.dark
-    colorName = cfg.color ?? 'custom'
-  } else if (cfg.hue != null) {
-    const e = hueEntry(cfg.hue)
-    light = e.light
-    dark = e.dark
-    colorName = 'hue' + Math.round(((cfg.hue % 360) + 360) % 360)
-  } else if (cfg.color && PARTS.bodies[cfg.color + '_' + SHAPES[0]]) {
-    const a = anchorOf(PARTS.bodies[cfg.color + '_' + SHAPES[0]])
-    light = a.light
-    dark = a.dark
-    colorName = cfg.color
+    colorName = typeof cfg.color === 'string' ? cfg.color : 'custom'
+  } else if (cfg.color !== undefined) {
+    const c = pickOne(cfg.color, () => pick(palette).name)
+    if (isHex(c)) {
+      const g = deriveGradient(c)
+      light = g.light
+      dark = g.dark
+      colorName = 'custom'
+    } else if (PARTS.bodies[c + '_' + SHAPES[0]]) {
+      const a = anchorOf(PARTS.bodies[c + '_' + SHAPES[0]])
+      light = a.light
+      dark = a.dark
+      colorName = c
+    } else {
+      const pe = pick(palette)
+      light = pe.light
+      dark = pe.dark
+      colorName = pe.name
+    }
+  } else if (cfg.hue !== undefined) {
+    const h = pickOne(cfg.hue, () => Math.round(hexToOklch(pick(palette).light)[2]))
+    const g = hueEntry(h)
+    light = g.light
+    dark = g.dark
+    colorName = 'hue' + Math.round(((h % 360) + 360) % 360)
   } else {
     const pe = pick(palette)
     light = pe.light
@@ -312,7 +380,9 @@ export function resolve(input: CharInput): Resolved {
   const avail: Mode[] = ['mono']
   if (k >= 2) avail.push('hetero')
   if (k === 3) avail.push('triad')
-  let mode: Mode = cfg.mode ?? (avail.length > 1 && rnd() < 0.5 ? pick(avail.slice(1)) : 'mono')
+  let mode: Mode = pickOne(cfg.mode, () =>
+    avail.length > 1 && rnd() < 0.5 ? pick(avail.slice(1)) : 'mono',
+  )
   if (!avail.includes(mode)) mode = 'mono'
 
   const tuning: Tuning = { ...DEFAULT_TUNING, ...cfg.tuning }

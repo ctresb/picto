@@ -29,8 +29,7 @@
     }
   },
   "files": [
-    "dist",
-    "logo.png"
+    "dist"
   ],
   "sideEffects": false,
   "scripts": {
@@ -53,6 +52,7 @@
     "react": ">=17"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/react": "^19.0.0",
     "react": "^19.0.0",
     "tsup": "^8.3.5",

@@ -14,7 +14,7 @@ export interface AnimEvent {
 type Listener = (e: AnimEvent) => void
 
 export interface SvgOptions {
-  /** Include the background tile (default true). false -> transparent. */
+  /** Add a background tile (default false). Omit/false -> transparent. */
   background?: boolean
   /** Id prefix to keep filters/gradients unique across SVGs in one document. */
   uid?: string
@@ -35,7 +35,7 @@ export class Character {
   /** Render this character to a standalone SVG string. */
   svg(opts: SvgOptions = {}): string {
     const c = this.config
-    const { background = true, uid = this._uid } = opts
+    const { background = false, uid = this._uid } = opts
     return compose({
       light: c.light,
       dark: c.dark,
