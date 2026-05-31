@@ -8,7 +8,7 @@
 import * as React from 'react'
 import { Character } from './character'
 import type { AnimName } from './character'
-import type { CharInput } from './engine'
+import type { CharConfig } from './engine'
 
 // progress p in 0..1 -> CSS transform for the target group
 interface AnimDef {
@@ -18,7 +18,7 @@ interface AnimDef {
   f: (p: number) => string
 }
 const TAU = Math.PI * 2
-const ANIMS: Record<AnimName, AnimDef> = {
+const ANIMS: Record<Exclude<AnimName, 'sleeping'>, AnimDef> = {
   blink: { loop: false, dur: 280, target: 'eyes', f: (p) => `scaleY(${1 - Math.sin(Math.PI * p) * 0.92})` },
   jump: {
     loop: false,
@@ -49,8 +49,102 @@ const ANIMS: Record<AnimName, AnimDef> = {
   },
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const ZZZ_PATHS = [
+  [
+    'M20 3H14V0H26V3H23V6H20V3Z',
+    'M14 9H17V6H20V9H26V12H14V9Z',
+  ],
+  [
+    'M9 15H5V13H13V15H11V17H9V15Z',
+    'M5 19H7V17H9V19H13V21H5V19Z',
+  ],
+  [
+    'M3 23V24H2V23H0V22H4V23H3Z',
+    'M0 25H1V24H2V25H4V26H0V25Z',
+  ],
+]
+
+function makeSleepZzz(): SVGGElement {
+  const wrap = document.createElementNS(SVG_NS, 'g')
+  wrap.setAttribute('class', 'sleep-zzz')
+  wrap.setAttribute('transform', 'translate(24 -2) scale(0.55)')
+  wrap.style.pointerEvents = 'none'
+
+  for (let i = 0; i < ZZZ_PATHS.length; i++) {
+    const z = document.createElementNS(SVG_NS, 'g')
+    z.setAttribute('class', `sleep-zzz-${i}`)
+    z.style.willChange = 'transform'
+
+    for (const d of ZZZ_PATHS[i]) {
+      const path = document.createElementNS(SVG_NS, 'path')
+      path.setAttribute('d', d)
+      path.setAttribute('fill', i === 0 ? '#3B2199' : i === 1 ? '#4F6FC4' : '#6CA3E2')
+      z.appendChild(path)
+    }
+
+    wrap.appendChild(z)
+  }
+
+  return wrap
+}
+
+function runSleepingAnim(svg: SVGElement): () => void {
+  const char = svg.querySelector<SVGElement>('.char')
+  const eyes = svg.querySelector<SVGElement>('.eyes')
+  if (!char || !eyes) return () => {}
+
+  const zzz = makeSleepZzz()
+  svg.appendChild(zzz)
+  svg.style.overflow = 'visible'
+
+  char.style.transformBox = 'fill-box'
+  char.style.transformOrigin = '50% 100%'
+  char.style.willChange = 'transform'
+  eyes.style.transformBox = 'fill-box'
+  eyes.style.transformOrigin = 'center'
+  eyes.style.willChange = 'transform'
+  eyes.style.transform = 'scaleY(0.08)'
+
+  const zs = Array.from(zzz.children) as SVGGElement[]
+  let raf = 0
+  let start = 0
+  const step = (ts: number) => {
+    if (!char.isConnected || !eyes.isConnected || !zzz.isConnected) return
+    if (!start) start = ts
+    const p = ((ts - start) / 2800) % 1
+    const breath = Math.sin(TAU * p)
+    char.style.transform = `scaleY(${1 + 0.025 * breath}) scaleX(${1 - 0.012 * breath})`
+
+    for (let i = 0; i < zs.length; i++) {
+      const y = Math.sin(TAU * p + i * 0.85) * 1.6
+      zs[i].style.transform = `translateY(${y}px)`
+    }
+
+    raf = requestAnimationFrame(step)
+  }
+  raf = requestAnimationFrame(step)
+
+  return () => {
+    cancelAnimationFrame(raf)
+    char.style.transform = ''
+    eyes.style.transform = ''
+    zzz.remove()
+  }
+}
+
+const reactUseId = (React as unknown as { useId?: () => string }).useId
+let fallbackId = 0
+
+function usePictoUid(): string {
+  const id = reactUseId ? reactUseId() : React.useMemo(() => `r${++fallbackId}`, [])
+  return 'p' + id.replace(/[^a-zA-Z0-9_-]/g, '') + '_'
+}
+
 // rAF tween on the .char / .eyes group. Returns a stop() that resets the transform.
 function runAnim(svg: SVGElement, name: AnimName): () => void {
+  if (name === 'sleeping') return runSleepingAnim(svg)
+
   const a = ANIMS[name]
   const target = svg.querySelector<SVGElement>('.' + a.target)
   if (!target) return () => {}
@@ -85,7 +179,7 @@ export interface PictoProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 
   /** Seed for a fresh character. */
   seed?: number | string
   /** Explicit config for a fresh character. */
-  config?: CharInput
+  config?: CharConfig
   /** Rendered size in px (width = height). Default 120. */
   size?: number
   /** Add a background tile behind the picto. Default false (transparent). */
@@ -98,8 +192,8 @@ export const Picto = React.forwardRef<HTMLSpanElement, PictoProps>(function Pict
   { char, seed, config, size = 120, background = false, animate, style, ...rest },
   ref,
 ) {
-  // stable, SSR-safe id prefix (no colons — they break url(#id) refs)
-  const uid = 'p' + React.useId().replace(/[^a-zA-Z0-9]/g, '') + '_'
+  // React 18+ uses useId for SSR-safe IDs; React 17 falls back to a client-stable id.
+  const uid = usePictoUid()
 
   const character = React.useMemo(() => {
     if (char) return char

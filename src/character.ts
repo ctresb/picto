@@ -5,7 +5,7 @@ import { compose, resolve } from './engine'
 import { hashSeed } from './rng'
 import type { CharInput, Resolved } from './engine'
 
-export type AnimName = 'blink' | 'jump' | 'breath' | 'dance'
+export type AnimName = 'blink' | 'jump' | 'breath' | 'dance' | 'sleeping'
 
 /** name = animation to play, or null to stop. */
 export interface AnimEvent {
@@ -18,6 +18,10 @@ export interface SvgOptions {
   background?: boolean
   /** Id prefix to keep filters/gradients unique across SVGs in one document. */
   uid?: string
+}
+
+function safeUid(uid: string): string {
+  return uid.replace(/[^a-zA-Z0-9_-]/g, '') || 'p_'
 }
 
 export class Character {
@@ -35,7 +39,8 @@ export class Character {
   /** Render this character to a standalone SVG string. */
   svg(opts: SvgOptions = {}): string {
     const c = this.config
-    const { background = false, uid = this._uid } = opts
+    const { background = false } = opts
+    const uid = safeUid(opts.uid ?? this._uid)
     return compose({
       light: c.light,
       dark: c.dark,
@@ -70,6 +75,10 @@ export class Character {
   /** Dance (loops until stop or another animation). */
   dance(): this {
     return this._emit('dance')
+  }
+  /** Sleep (loops until stop or another animation). */
+  sleep(): this {
+    return this._emit('sleeping')
   }
   /** Stop any running animation. */
   stop(): this {

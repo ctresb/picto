@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="assets/logo.png" alt="picto" width="340" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/logo.png" alt="picto" width="340" />
 </p>
 
 <p align="center">
-  <img src="assets/latte.gif" width="92" alt="Latte dancing" />
-  <img src="assets/kiwi.gif" width="92" alt="Kiwi dancing" />
-  <img src="assets/goose.gif" width="92" alt="Goose dancing" />
-  <img src="assets/waffle.gif" width="92" alt="Waffle dancing" />
-  <img src="assets/mango.gif" width="92" alt="Mango dancing" />
-  <img src="assets/udon.gif" width="92" alt="Udon dancing" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/latte.gif" width="92" alt="Latte dancing" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/kiwi.gif" width="92" alt="Kiwi dancing" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/goose.gif" width="92" alt="Goose dancing" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/waffle.gif" width="92" alt="Waffle dancing" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/mango.gif" width="92" alt="Mango dancing" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/udon.gif" width="92" alt="Udon dancing" />
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 
 ## What is this?
 
-`picto` makes cute little SVG characters out of thin air.
+`pictoguys` makes cute little SVG characters out of thin air.
 
 You hand it a number or a word. It hands you back a character: a colored body,
 some eyes, eyebrows, and (if you want one) a background tile. The same word
@@ -63,18 +63,26 @@ Pick those yourself, or let a seed pick them for you. Either way you get a picto
 ## Install
 
 ```bash
-npm install picto
+npm install pictoguys
 ```
 
-`react` is the only thing you need alongside it (version 17 or newer). There are
-zero other dependencies.
+For React components, bring your own `react` (version 17 or newer). For SVG-only
+usage, import from `pictoguys/core` and React is not loaded. There are zero
+runtime dependencies.
+
+| Import path | Use it for |
+| ----------- | ---------- |
+| `pictoguys` | React projects that want `<Picto />` plus the core helpers |
+| `pictoguys/react` | Only the React component and its props |
+| `pictoguys/core` | SVG strings, characters, presets, and catalog helpers without React |
+| `pictoguys/rng` | The tiny deterministic RNG only |
 
 ## Your first picto
 
 Drop this into any React component:
 
 ```tsx
-import { Picto } from 'picto'
+import { Picto } from 'pictoguys'
 
 export default function App() {
   return <Picto seed="Bloop" size={120} />
@@ -92,9 +100,9 @@ Here is what a handful of names look like. Try your own.
 
 |  |  |  |  |  |  |
 |:-:|:-:|:-:|:-:|:-:|:-:|
-| <img src="assets/bloop.svg" width="76" alt="Bloop"/> | <img src="assets/mochi.svg" width="76" alt="Mochi"/> | <img src="assets/zorp.svg" width="76" alt="Zorp"/> | <img src="assets/waffle.svg" width="76" alt="Waffle"/> | <img src="assets/gizmo.svg" width="76" alt="Gizmo"/> | <img src="assets/noodle.svg" width="76" alt="Noodle"/> |
+| <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/bloop.svg" width="76" alt="Bloop"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/mochi.svg" width="76" alt="Mochi"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/zorp.svg" width="76" alt="Zorp"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/waffle.svg" width="76" alt="Waffle"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/gizmo.svg" width="76" alt="Gizmo"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/noodle.svg" width="76" alt="Noodle"/> |
 | `"Bloop"` | `"Mochi"` | `"Zorp"` | `"Waffle"` | `"Gizmo"` | `"Noodle"` |
-| <img src="assets/tofu.svg" width="76" alt="Tofu"/> | <img src="assets/bubbles.svg" width="76" alt="Bubbles"/> | <img src="assets/sprocket.svg" width="76" alt="Sprocket"/> | <img src="assets/pickle.svg" width="76" alt="Pickle"/> | <img src="assets/goose.svg" width="76" alt="Goose"/> | <img src="assets/wizard.svg" width="76" alt="Wizard"/> |
+| <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/tofu.svg" width="76" alt="Tofu"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/bubbles.svg" width="76" alt="Bubbles"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/sprocket.svg" width="76" alt="Sprocket"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/pickle.svg" width="76" alt="Pickle"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/goose.svg" width="76" alt="Goose"/> | <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/wizard.svg" width="76" alt="Wizard"/> |
 | `"Tofu"` | `"Bubbles"` | `"Sprocket"` | `"Pickle"` | `"Goose"` | `"Wizard"` |
 
 Waffle and Bubbles got fancy multi-colored eyes. Lucky.
@@ -130,13 +138,13 @@ filled in for you.
 ```
 
 <p align="center">
-  <img src="assets/custom.svg" width="120" alt="custom pink triple-eye picto" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/custom.svg" width="120" alt="custom pink triple-eye picto" />
 </p>
 
 Using TypeScript? Import the config type for full autocomplete:
 
 ```ts
-import type { CharConfig } from 'picto'
+import type { CharConfig } from 'pictoguys'
 
 const cfg: CharConfig = { color: 'blue', eyes: 'double' }
 ```
@@ -161,7 +169,7 @@ keeps your color but gets their own body and face. You can pass a brand **hex**
 straight in, and a matching darker shade is generated for the gradient.
 
 ```tsx
-import { picto, Picto } from 'picto'
+import { picto, Picto } from 'pictoguys'
 
 const brand = picto.preset({ color: '#19c37d' }) // your green
 
@@ -172,11 +180,11 @@ function Avatar({ userId }) {
 ```
 
 <p align="center">
-  <img src="assets/brand-1.svg" width="84" alt="" />
-  <img src="assets/brand-2.svg" width="84" alt="" />
-  <img src="assets/brand-3.svg" width="84" alt="" />
-  <img src="assets/brand-4.svg" width="84" alt="" />
-  <img src="assets/brand-5.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/brand-1.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/brand-2.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/brand-3.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/brand-4.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/brand-5.svg" width="84" alt="" />
 </p>
 
 <p align="center"><em>Same brand green. Different bodies and faces. One per user.</em></p>
@@ -199,11 +207,11 @@ Lock the shape and the face, let the color come from the seed:
 ```
 
 <p align="center">
-  <img src="assets/shapelock-1.svg" width="84" alt="" />
-  <img src="assets/shapelock-2.svg" width="84" alt="" />
-  <img src="assets/shapelock-3.svg" width="84" alt="" />
-  <img src="assets/shapelock-4.svg" width="84" alt="" />
-  <img src="assets/shapelock-5.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/shapelock-1.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/shapelock-2.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/shapelock-3.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/shapelock-4.svg" width="84" alt="" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/shapelock-5.svg" width="84" alt="" />
 </p>
 
 <p align="center"><em>Same shape, same plain face. Only the color rolls.</em></p>
@@ -231,7 +239,7 @@ or an array of either. For full manual control, set both gradient stops yourself
 with `light` and `dark`. Want to preview the gradient a hex would make?
 
 ```ts
-import { picto } from 'picto'
+import { picto } from 'pictoguys'
 
 picto.gradient('#19c37d') // { light: '#19c37d', dark: '#003329' }
 picto.gradient(140)       // a gradient for hue 140 degrees
@@ -250,15 +258,15 @@ Two ways, pick whichever feels easier.
 <Picto seed="Gizmo" animate="breath" />
 ```
 
-Animations available: `"blink"`, `"jump"`, `"breath"`, `"dance"`.
-`breath` and `dance` loop forever. `blink` and `jump` play once.
+Animations available: `"blink"`, `"jump"`, `"breath"`, `"dance"`, `"sleeping"`.
+`breath`, `dance`, and `sleeping` loop forever. `blink` and `jump` play once.
 
 **The hands-on way: tell a specific picto to do something.**
 
 First make a picto with `picto.character(...)`, then call methods on it:
 
 ```tsx
-import { picto, Picto } from 'picto'
+import { picto, Picto } from 'pictoguys'
 
 function Mascot() {
   const guy = React.useMemo(() => picto.character('Gizmo'), [])
@@ -268,6 +276,7 @@ function Mascot() {
       <Picto char={guy} size={140} />
       <button onClick={() => guy.blink()}>blink</button>
       <button onClick={() => guy.dance()}>dance</button>
+      <button onClick={() => guy.sleep()}>sleep</button>
       <button onClick={() => guy.stop()}>chill</button>
     </>
   )
@@ -279,6 +288,7 @@ guy.blink()    // one blink
 guy.jump()     // one hop
 guy.breath()   // breathe (loops)
 guy.dance()    // dance (loops)
+guy.sleep()    // sleep with Zs (loops)
 guy.stop()     // freeze
 ```
 
@@ -297,7 +307,7 @@ guy.stop()     // freeze
 | `char`       | `Character`                            | none    | Use a picto you already made (wins).      |
 | `size`       | `number`                               | `120`   | Width and height, in pixels.              |
 | `background` | `boolean`                              | `false` | Set `true` to add a background tile.      |
-| `animate`    | `"blink" \| "jump" \| "breath" \| "dance"` | none | Play an animation on loop or once.      |
+| `animate`    | `"blink" \| "jump" \| "breath" \| "dance" \| "sleeping"` | none | Play an animation on loop or once.      |
 
 Any normal `<span>` prop works too (`className`, `style`, `onClick`, and so on),
 because that is what `<Picto>` renders into.
@@ -311,9 +321,9 @@ colored tile behind one instead? Flip one switch:
 ```
 
 <p align="center">
-  <img src="assets/bloop.svg" width="120" alt="Bloop, bare" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/bloop.svg" width="120" alt="Bloop, bare" />
   &nbsp;&nbsp;
-  <img src="assets/bloop-bg.svg" width="120" alt="Bloop with a background tile" />
+  <img src="https://raw.githubusercontent.com/ctresb/picto/main/assets/bloop-bg.svg" width="120" alt="Bloop with a background tile" />
 </p>
 
 ## Using it outside React
@@ -322,7 +332,7 @@ A picto is just an SVG string under the hood, so you can grab that string and do
 whatever you want with it (emails, server rendering, saving to a file).
 
 ```ts
-import { picto } from 'picto'
+import { picto } from 'pictoguys/core'
 
 const svg      = picto.character('Bloop').svg()                  // bare (default)
 // -> "<svg viewBox=\"0 0 40 40\" ...>...</svg>"
@@ -349,13 +359,13 @@ of the character art attached. Handy if you only want stable, repeatable random
 numbers:
 
 ```ts
-import { mulberry32, hashSeed } from 'picto/rng'
+import { mulberry32, hashSeed } from 'pictoguys/rng'
 
 const random = mulberry32(hashSeed('any-string'))
 random() // a number 0..1, the same every time for that string
 ```
 
-Importing `picto/rng` pulls in well under 1 KB. Importing the full library
+Importing `pictoguys/rng` pulls in well under 1 KB. Importing the full library
 includes the character art (that art is the whole point, so it ships with it).
 
 ## How it works (the 20 second version)

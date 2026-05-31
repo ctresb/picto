@@ -270,6 +270,7 @@ function stableHash(cfg: CharConfig): number {
 }
 
 const isHex = (s: string) => /^#?[0-9a-fA-F]{6}$/.test(s)
+const normalizeHex = (s: string): string | null => (isHex(s) ? (s[0] === '#' ? s : '#' + s).toLowerCase() : null)
 
 // The anchor whose hue is closest to H, for borrowing a tasteful light->dark delta.
 function nearestAnchorByHue(H: number) {
@@ -281,7 +282,8 @@ function nearestAnchorByHue(H: number) {
 // Turn one brand hex into a {light, dark} gradient: the hex is the light stop, the
 // dark stop borrows the lightness/chroma/hue drop of the nearest artist color.
 function deriveGradient(hex: string): { light: string; dark: string } {
-  const light = hex[0] === '#' ? hex : '#' + hex
+  const light = normalizeHex(hex)
+  if (!light) throw new TypeError('picto.gradient(...) expects a 6-digit hex color.')
   const [L, C, H] = hexToOklch(light)
   const a = nearestAnchorByHue(H)
   return { light, dark: oklchToHex(L + a.p[3], Math.max(0, C + a.p[4]), H + a.p[5]) }
@@ -340,14 +342,17 @@ export function resolve(input: CharInput): Resolved {
   let light: string
   let dark: string
   let colorName: string
-  if (cfg.light && cfg.dark) {
-    light = cfg.light
-    dark = cfg.dark
+  const manualLight = cfg.light ? normalizeHex(cfg.light) : null
+  const manualDark = cfg.dark ? normalizeHex(cfg.dark) : null
+  if (manualLight && manualDark) {
+    light = manualLight
+    dark = manualDark
     colorName = typeof cfg.color === 'string' ? cfg.color : 'custom'
   } else if (cfg.color !== undefined) {
     const c = pickOne(cfg.color, () => pick(palette).name)
-    if (isHex(c)) {
-      const g = deriveGradient(c)
+    const hex = normalizeHex(c)
+    if (hex) {
+      const g = deriveGradient(hex)
       light = g.light
       dark = g.dark
       colorName = 'custom'

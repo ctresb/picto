@@ -1,5 +1,5 @@
 {
-  "name": "picto",
+  "name": "pictoguys",
   "version": "0.1.0",
   "description": "Tiny React library for procedural SVG characters. Seed in, character out.",
   "type": "module",
@@ -8,25 +8,26 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "require": "./dist/react.cjs"
     },
     "./rng": {
-      "import": {
-        "types": "./dist/rng.d.ts",
-        "default": "./dist/rng.js"
-      },
-      "require": {
-        "types": "./dist/rng.d.cts",
-        "default": "./dist/rng.cjs"
-      }
-    }
+      "types": "./dist/rng.d.ts",
+      "import": "./dist/rng.js",
+      "require": "./dist/rng.cjs"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
@@ -36,7 +37,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run typecheck && npm run build",
+    "release:check": "npm run typecheck && npm run build && npm pack --dry-run"
   },
   "keywords": [
     "react",
@@ -48,8 +50,21 @@
     "picto"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ctresb/picto.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ctresb/picto/issues"
+  },
+  "homepage": "https://github.com/ctresb/picto#readme",
   "peerDependencies": {
     "react": ">=17"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
