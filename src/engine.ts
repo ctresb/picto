@@ -284,9 +284,21 @@ const EYES_FRAG = new Map<string, string>()
 const BROW_FRAG = new Map<string, string>()
 const BG_FRAG = new Map<string, string>()
 
-// Assemble background + recolored body/eyes/brows into one <svg> string.
-// The animatable groups are .char (body+eyes+brows) and .eyes (just the eyes).
-export function compose(a: ComposeArgs): string {
+// The four namespaced inner fragments that make up a composed picto, in z-order
+// terms: body, eyes, eyebrows (wb), and the optional background (back).
+interface Fragments {
+  body: string
+  eyes: string
+  wb: string
+  back: string
+}
+
+// Resolve the cached, recolored, per-uid namespaced inner fragments for `a`.
+// This is the single source of the BODY_FRAG/EYES_FRAG/BROW_FRAG/BG_FRAG cache
+// lookups and the uid+'b_'/'e_'/'w_'/'g_' namespacing. Both compose() and
+// layers() call it so the exact same cached fragments are reused with no logic
+// or cache duplication. `back` is '' when no background is requested.
+function fragments(a: ComposeArgs): Fragments {
   const bodyH = hexToOklch(a.light)[2]
   const feat = featureDark(hexToOklch(a.dark)[2], a.tuning)
   const k = PUPILS[a.eye.split('_')[0]]
@@ -327,12 +339,209 @@ export function compose(a: ComposeArgs): string {
     }
     back = nsIds(bgFrag, a.uid + 'g_')
   }
+  return { body, eyes, wb, back }
+}
+
+// Assemble background + recolored body/eyes/brows into one <svg> string.
+// The animatable groups are .char (body+eyes+brows) and .eyes (just the eyes).
+// Thin assembler over fragments(); returns the byte-identical string it always did.
+export function compose(a: ComposeArgs): string {
+  const { body, eyes, wb, back } = fragments(a)
   const svg =
     `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">` +
     `${back}<g class="char">${body}<g class="eyes">${eyes}</g>${wb}</g></svg>`
   if (a.variant === 'flat') return flatten(svg, a.light)
   return svg
 }
+
+// ---------------- per-layer sprite SVGs (batch / canvas renderer) ----------------
+
+/**
+ * Standalone, independently-rasterizable SVG strings for each picto layer, in
+ * bottom->top z-order: background (optional), body, eyes, eyebrows. Each string
+ * is a complete `<svg viewBox="0 0 40 40">` carrying its own `<defs>`, so it
+ * rasterizes pixel-identically to its slice of compose().
+ */
+export interface PictoLayers {
+  /** Background tile, present only when `background` was requested. */
+  background?: string
+  /** Body silhouette. 'flat' variant has the gradient + body filter stripped. */
+  body: string
+  /** Eyes (variant-independent; the per-pupil eye inner-shadows are kept in both). */
+  eyes: string
+  /** Eyebrows — render ON TOP of eyes. */
+  brows: string
+}
+
+// Wrap a namespaced inner fragment into a standalone crispEdges SVG. Same root
+// tag + attributes as compose()'s, so each layer rasterizes identically to its
+// slice of the composed picto at the same target size.
+const wrapLayer = (inner: string) =>
+  `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">${inner}</svg>`
+
+/**
+ * Split a picto into standalone per-layer SVGs reusing the EXACT cached fragments
+ * compose() uses (no recolor/cache duplication). Z-order is preserved by field
+ * naming: render background, then body, then eyes, then brows. The body layer is
+ * a body-only SVG, so the 'flat' flatten() (which only matches b_/paint0_radial
+ * body-only ids) is safe to run on it; eyes/brows are variant-independent.
+ */
+export function layers(a: ComposeArgs): PictoLayers {
+  const { body, eyes, wb, back } = fragments(a)
+  const bodySvg = a.variant === 'flat' ? flatten(wrapLayer(body), a.light) : wrapLayer(body)
+  const out: PictoLayers = {
+    body: bodySvg,
+    eyes: wrapLayer(eyes),
+    brows: wrapLayer(wb),
+  }
+  if (a.background) out.background = wrapLayer(back)
+  return out
+}
+
+// ---------------- content boxes (transform-box: fill-box parity) ----------------
+
+/** An axis-aligned content box in the 40x40 viewBox coordinate space. */
+export interface LayerBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * The content bounding boxes the canvas renderer needs to mirror the SVG's
+ * `transform-box: fill-box` behavior: percentage translates and transform-origin
+ * are relative to the animated element's CONTENT bbox, not the 40x40 viewBox.
+ */
+export interface ContentBox {
+  /** Union of body + eyes + brows (the .char group). Background is EXCLUDED. */
+  char: LayerBox
+  /** Eyes-only union (the .eyes group). */
+  eyes: LayerBox
+}
+
+// Scan a part SVG's geometry (path d= via M/L/H/V/Z + <rect x/y/width/height>)
+// for its axis-aligned opaque bounds. Exact for crispEdges axis-aligned rects
+// (every body/eye/brow part is M/L/H/V/Z or a rect — verified), so no raster
+// opaque-bounds pass is needed. Curve (C) commands appear only in backgrounds,
+// which are excluded from contentBox.
+function scanBox(svg: string): LayerBox | null {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let found = false
+  const acc = (x: number, y: number) => {
+    found = true
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  for (const m of svg.matchAll(/\bd="([^"]+)"/g)) {
+    const toks = m[1].match(/[MLHVZ]|-?\d*\.?\d+/g) || []
+    let i = 0
+    let cmd = ''
+    let x = 0
+    let y = 0
+    while (i < toks.length) {
+      const t = toks[i]
+      if (/^[MLHVZ]$/.test(t)) {
+        cmd = t
+        i++
+        if (cmd === 'Z') continue
+      }
+      if (cmd === 'M' || cmd === 'L') {
+        x = +toks[i++]
+        y = +toks[i++]
+        acc(x, y)
+      } else if (cmd === 'H') {
+        x = +toks[i++]
+        acc(x, y)
+      } else if (cmd === 'V') {
+        y = +toks[i++]
+        acc(x, y)
+      } else {
+        i++
+      }
+    }
+  }
+  for (const m of svg.matchAll(/<rect\b([^>]*?)\/?>/g)) {
+    const attrs = m[1]
+    const num = (kk: string) => {
+      const r = attrs.match(new RegExp('\\b' + kk + '="(-?\\d*\\.?\\d+)"'))
+      return r ? +r[1] : 0
+    }
+    const rx = num('x')
+    const ry = num('y')
+    const rw = num('width')
+    const rh = num('height')
+    acc(rx, ry)
+    acc(rx + rw, ry + rh)
+  }
+  return found ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY } : null
+}
+
+function unionBox(...bs: (LayerBox | null)[]): LayerBox {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const b of bs) {
+    if (!b) continue
+    if (b.x < minX) minX = b.x
+    if (b.y < minY) minY = b.y
+    if (b.x + b.w > maxX) maxX = b.x + b.w
+    if (b.y + b.h > maxY) maxY = b.y + b.h
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+}
+
+// Memoized by `${shape}|${eye}|${brow}` — background-independent (bg is a .char
+// sibling, excluded from both boxes), and recolor never moves geometry so the
+// boxes depend only on the part keys.
+const CONTENTBOX_CACHE = new Map<string, ContentBox>()
+
+/**
+ * The .char and .eyes content boxes (in 40x40 viewBox units) derived from the RAW
+ * part geometry. char = union of body + eyes + brows; eyes = eyes-only. The
+ * background is excluded from both (it is a .char sibling in compose()'s output).
+ * Used by the canvas renderer to apply animation transforms about the same origin
+ * and with the same % basis as the SVG's `transform-box: fill-box`.
+ */
+export function contentBox(a: ComposeArgs): ContentBox {
+  const key = `${a.shape}|${a.eye}|${a.brow}`
+  let r = CONTENTBOX_CACHE.get(key)
+  if (r === undefined) {
+    const bodyBox = scanBox(PARTS.bodies[COLORS[0] + '_' + a.shape])
+    const eyesBox = scanBox(PARTS.eyes[a.eye])
+    const browBox = scanBox(PARTS.eyebrows[a.brow])
+    r = { char: unionBox(bodyBox, eyesBox, browBox), eyes: eyesBox ?? { x: 0, y: 0, w: 0, h: 0 } }
+    CONTENTBOX_CACHE.set(key, r)
+  }
+  return r
+}
+
+// ---------------- shared sleeping (zzz) animation data ----------------
+
+/**
+ * The "zzz" sprite for the sleeping animation, shared so the React ticker and the
+ * canvas renderer reproduce it identically. `paths` are three sub-groups (each an
+ * array of path d= strings), `fills` are their fixed per-group colors, `base` is
+ * the group's base transform (translate then scale), `amp`/`phase` drive the
+ * per-sub-group bob: translateY(sin(TAU*p + i*phase) * amp) px.
+ */
+export const ZZZ = {
+  paths: [
+    ['M20 3H14V0H26V3H23V6H20V3Z', 'M14 9H17V6H20V9H26V12H14V9Z'],
+    ['M9 15H5V13H13V15H11V17H9V15Z', 'M5 19H7V17H9V19H13V21H5V19Z'],
+    ['M3 23V24H2V23H0V22H4V23H3Z', 'M0 25H1V24H2V25H4V26H0V25Z'],
+  ] as const,
+  fills: ['#3B2199', '#4F6FC4', '#6CA3E2'] as const,
+  base: { translate: [24, -2] as const, scale: 0.55 },
+  amp: 1.6,
+  phase: 0.85,
+} as const
 
 // ---------------- config + resolution ----------------
 

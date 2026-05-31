@@ -1,6 +1,6 @@
 {
   "name": "pictoguys",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Tiny React library for procedural SVG characters. Seed in, character out.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -21,6 +21,16 @@
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js",
       "require": "./dist/react.cjs"
+    },
+    "./react-canvas": {
+      "types": "./dist/react-canvas.d.ts",
+      "import": "./dist/react-canvas.js",
+      "require": "./dist/react-canvas.cjs"
+    },
+    "./canvas": {
+      "types": "./dist/canvas.d.ts",
+      "import": "./dist/canvas.js",
+      "require": "./dist/canvas.cjs"
     },
     "./rng": {
       "types": "./dist/rng.d.ts",
@@ -47,7 +57,8 @@
     "procedural",
     "generative",
     "character",
-    "picto"
+    "picto",
+    "canvas"
   ],
   "license": "MIT",
   "repository": {

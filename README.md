@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.1-ff69b4" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.0-ff69b4" alt="version" />
   <img src="https://img.shields.io/badge/TypeScript-ready-3178c6?logo=typescript&logoColor=white" alt="typescript" />
   <img src="https://img.shields.io/badge/React-%E2%89%A5%2017-61dafb?logo=react&logoColor=white" alt="react" />
   <img src="https://img.shields.io/badge/runtime%20deps-0-22c55e" alt="zero deps" />
@@ -72,8 +72,10 @@ runtime dependencies.
 
 | Import path | Use it for |
 | ----------- | ---------- |
-| `pictoguys` | React projects that want `<Picto />` plus the core helpers |
-| `pictoguys/react` | Only the React component and its props |
+| `pictoguys` | React projects that want `<Picto />`, `<PictoField />`, plus the core helpers |
+| `pictoguys/react` | Only the single-picto React component `<Picto />` and its props |
+| `pictoguys/react-canvas` | Only `<PictoField />` (the canvas batch renderer) and its props |
+| `pictoguys/canvas` | The framework-agnostic batch renderer core, no React |
 | `pictoguys/core` | SVG strings, characters, presets, and catalog helpers without React |
 | `pictoguys/rng` | The tiny deterministic RNG only |
 
@@ -296,6 +298,168 @@ guy.stop()     // freeze
 > on screen. If that picto is not currently rendered, the call simply does
 > nothing (no crash, no error, just a no-op). So render it first, then animate it.
 
+## Rendering many pictos
+
+One picto? Reach for `<Picto>`. A whole wall of them (a leaderboard, a member
+directory, a sticker sheet, hundreds or thousands of avatars)? That is where
+`<PictoField>` comes in.
+
+`<PictoField>` draws **many pictos onto a single `<canvas>`**, and it can keep
+hundreds to thousands of them moving at 60fps. It is the **recommended way to
+render multiple pictos**. `<Picto>` is not going anywhere and is not deprecated;
+it is simply the right tool for one or a few pictos (or when you specifically
+want real DOM nodes). Both draw the *same* art and play the *same* animations, so
+you can mix them freely.
+
+Hand it an array of characters and it lays them out for you:
+
+```tsx
+import { picto, PictoField } from 'pictoguys'
+
+// build as many little guys as you like
+const chars = React.useMemo(
+  () => Array.from({ length: 500 }, (_, i) => picto.character(i)),
+  [],
+)
+
+export default function Wall() {
+  return <PictoField chars={chars} size={64} height="70vh" />
+}
+```
+
+That is a 500-picto grid that scrolls smoothly. By default `<PictoField>` owns
+its own scroll viewport (an `overflow:auto` box sized by `height`, default
+`'70vh'`) and only ever draws the pictos you can actually see, so the count
+barely matters.
+
+**Lay them out your way.** By default they auto-flow into a grid. Pass `cols` to
+fix the column count, or pass an explicit array of top-left positions:
+
+```tsx
+<PictoField chars={chars} cols={10} gap={16} />
+<PictoField chars={chars} layout={[{ x: 0, y: 0 }, { x: 80, y: 0 }, /* ... */]} />
+```
+
+**Animate the whole field at once.** The easy way is the declarative `animate`
+prop, which plays one animation on *every* picto:
+
+```tsx
+<PictoField chars={chars} animate="breath" />   {/* the whole crowd breathes */}
+```
+
+The hands-on way is the imperative handle. `<PictoField>` forwards a ref to a
+renderer you can poke directly. The animation target is either a single
+`Character` from your `chars` array or the literal `'all'`:
+
+```tsx
+import { picto, PictoField } from 'pictoguys'
+import type { PictoRenderer } from 'pictoguys'
+
+function Crowd() {
+  const ref = React.useRef<PictoRenderer>(null)
+  const chars = React.useMemo(
+    () => Array.from({ length: 300 }, (_, i) => picto.character(i)),
+    [],
+  )
+
+  return (
+    <>
+      <PictoField ref={ref} chars={chars} size={64} />
+      <button onClick={() => ref.current?.blink('all')}>everyone blink</button>
+      <button onClick={() => ref.current?.dance(chars[0])}>just the first one dances</button>
+      <button onClick={() => ref.current?.stop('all')}>chill</button>
+    </>
+  )
+}
+```
+
+The handle exposes `blink`, `jump`, `breath`, `dance`, `sleep`, `stop`, and a
+general `play(target, name)` (pass `name: null` to stop), plus `start()`,
+`dispose()`, and a `metrics()` peek. (Note: the looping animation string is
+`'sleeping'`, but the method is `sleep()`.)
+
+### Flat or fancy: the `variant` prop
+
+Both `<Picto>` and `<PictoField>` take a `variant` prop:
+
+| Variant   | Look                                                            |
+| --------- | -------------------------------------------------------------- |
+| `'fancy'` | The original look: gradient body plus soft shadows. **Default.** |
+| `'flat'`  | Drops the body gradient and the body shadow (the eye shadows stay). Cheaper to paint, which is handy across a big grid. |
+
+```tsx
+<Picto seed="Bloop" variant="flat" />
+<PictoField chars={chars} variant="flat" />   {/* lighter paint for huge fields */}
+```
+
+`fancy` is the default everywhere, so leave it off if you want the classic look.
+
+### Best practices for many pictos
+
+- **100+ pictos? Use `<PictoField>` (canvas), not a pile of `<Picto>`s.** One
+  canvas with culling beats hundreds of DOM nodes.
+- **Reach for `variant="flat"` on very large grids.** It skips the gradient and
+  shadow, so each tile is cheaper to paint.
+- **Reuse seeds.** Identical characters share one cached sprite, so a grid full of
+  repeats is nearly free to draw.
+- **Let `<PictoField>` own its scroller** via the `height` prop (default `'70vh'`).
+  Only pass `scrollParentRef` when the field must scroll inside an existing scroll
+  container you already control.
+- **Animate via the ref (`'all'` or a single character) or the `animate` prop.**
+  Both routes share the renderer's per-character clock.
+- **The canvas pixels match the SVG** at the rendered size, so a `<PictoField>`
+  tile and a `<Picto>` of the same `size` look identical.
+- **Keep `<Picto>` (DOM/SVG) for single avatars** or anywhere you need real DOM
+  nodes, CSS styling, or accessibility hooks on the element itself.
+
+### Without React (custom layouts, other frameworks)
+
+The batch renderer has a framework-agnostic core under `pictoguys/canvas`. Give
+`createPictoRenderer` a `<canvas>` and drive it yourself:
+
+```ts
+import { createPictoRenderer, canvasSupported } from 'pictoguys/canvas'
+import { picto } from 'pictoguys/core'
+
+if (canvasSupported) {
+  const canvas = document.querySelector('canvas')!
+  const renderer = createPictoRenderer({ canvas, size: 64, variant: 'flat' })
+
+  renderer.setItems([
+    { char: picto.character('Bloop'), x: 0, y: 0 },
+    { char: picto.character('Mochi'), x: 80, y: 0 },
+  ])
+  renderer.start()
+  renderer.breath('all')
+  // ...later: renderer.dispose()
+}
+```
+
+`createPictoRenderer` is always safe to call: on the server or anywhere without a
+canvas it returns a harmless no-op, and `canvasSupported` lets you fall back to
+`<Picto>` when you need to.
+
+## PictoField props
+
+`<PictoField>` accepts these. Only `chars` is required.
+
+| Prop              | Type                          | Default  | What it does                                            |
+| ----------------- | ----------------------------- | -------- | ------------------------------------------------------- |
+| `chars`           | `Character[]`                 | —        | The pictos to draw, one tile each, in order. Required.  |
+| `size`            | `number`                      | `64`     | Tile width and height, in pixels.                       |
+| `variant`         | `'fancy' \| 'flat'`           | `'fancy'`| Body look (see above).                                  |
+| `background`      | `boolean`                     | `false`  | Draw a background tile behind each picto.               |
+| `layout`          | `'grid' \| {x,y}[]`           | `'grid'` | Auto-flow grid, or explicit top-left positions.         |
+| `cols`            | `number`                      | auto     | Grid columns. Omit to derive from the canvas width.     |
+| `gap`             | `number`                      | `12`     | Gap between grid tiles, in pixels.                      |
+| `animate`         | `"blink" \| "jump" \| "breath" \| "dance" \| "sleeping" \| null` | `null` | Play one animation on every picto.        |
+| `height`          | `number \| string`            | `'70vh'` | Height of the self-owned scroll viewport.               |
+| `scrollParentRef` | `RefObject<HTMLElement>`      | none     | Advanced: scroll inside your own container instead.     |
+| `dpr`             | `number`                      | auto     | Device-pixel-ratio override.                            |
+| `maxCacheBytes`   | `number`                      | 256 MB   | Soft sprite-cache size cap.                             |
+| `style`           | `CSSProperties`               | none     | Applied to the inner `<canvas>`.                        |
+| `className`       | `string`                      | none     | Applied to the outer wrapper `<div>`.                   |
+
 ## All the props
 
 `<Picto>` accepts these. Everything is optional.
@@ -308,9 +472,13 @@ guy.stop()     // freeze
 | `size`       | `number`                               | `120`   | Width and height, in pixels.              |
 | `background` | `boolean`                              | `false` | Set `true` to add a background tile.      |
 | `animate`    | `"blink" \| "jump" \| "breath" \| "dance" \| "sleeping"` | none | Play an animation on loop or once.      |
+| `variant`    | `"fancy" \| "flat"`                    | `"fancy"`| Body look: `flat` drops the gradient/shadow. |
 
 Any normal `<span>` prop works too (`className`, `style`, `onClick`, and so on),
 because that is what `<Picto>` renders into.
+
+> Rendering a crowd of pictos? See [Rendering many pictos](#rendering-many-pictos)
+> for `<PictoField>`, the canvas batch renderer.
 
 Pictos are see-through by default, so they sit nicely on top of anything. Want a
 colored tile behind one instead? Flip one switch:

@@ -1,9 +1,9 @@
 // A Character is a resolved spec + an SVG renderer + a tiny animation emitter.
 // The emitter lets `char.blink()` drive a mounted <Picto char={char} />.
 
-import { compose, resolve } from './engine'
+import { compose, contentBox, layers, resolve } from './engine'
 import { hashSeed } from './rng'
-import type { CharInput, Resolved, Variant } from './engine'
+import type { CharInput, ComposeArgs, ContentBox, PictoLayers, Resolved, Variant } from './engine'
 
 export type AnimName = 'blink' | 'jump' | 'breath' | 'dance' | 'sleeping'
 
@@ -41,12 +41,13 @@ export class Character {
     this._uid = 'p' + hashSeed(JSON.stringify(this.config)).toString(36) + '_'
   }
 
-  /** Render this character to a standalone SVG string. */
-  svg(opts: SvgOptions = {}): string {
+  // Build the ComposeArgs for the engine from this.config + opts. The single
+  // source so svg(), layers(), and contentBox() all derive identical args.
+  private _args(opts: SvgOptions): ComposeArgs {
     const c = this.config
     const { background = false, variant = 'fancy' } = opts
     const uid = safeUid(opts.uid ?? this._uid)
-    return compose({
+    return {
       light: c.light,
       dark: c.dark,
       shape: c.shape,
@@ -58,7 +59,29 @@ export class Character {
       uid,
       background,
       variant,
-    })
+    }
+  }
+
+  /** Render this character to a standalone SVG string. */
+  svg(opts: SvgOptions = {}): string {
+    return compose(this._args(opts))
+  }
+
+  /**
+   * Standalone per-layer SVG strings (background, body, eyes, brows) for this
+   * character, each independently rasterizable. For the batch/canvas renderer;
+   * reuses the same fragment caches as svg(), which stays unchanged.
+   */
+  layers(opts: SvgOptions = {}): PictoLayers {
+    return layers(this._args(opts))
+  }
+
+  /**
+   * The .char and .eyes content boxes (40x40 viewBox units) for this character,
+   * so the canvas renderer can mirror the SVG's transform-box: fill-box motion.
+   */
+  contentBox(opts: SvgOptions = {}): ContentBox {
+    return contentBox(this._args(opts))
   }
 
   toString(): string {
