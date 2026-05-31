@@ -8,7 +8,7 @@
 import * as React from 'react'
 import { Character } from './character'
 import type { AnimName } from './character'
-import type { CharConfig } from './engine'
+import type { CharConfig, Variant } from './engine'
 
 // progress p in 0..1 -> CSS transform for the target group
 interface AnimDef {
@@ -74,7 +74,6 @@ function makeSleepZzz(): SVGGElement {
   for (let i = 0; i < ZZZ_PATHS.length; i++) {
     const z = document.createElementNS(SVG_NS, 'g')
     z.setAttribute('class', `sleep-zzz-${i}`)
-    z.style.willChange = 'transform'
 
     for (const d of ZZZ_PATHS[i]) {
       const path = document.createElementNS(SVG_NS, 'path')
@@ -89,7 +88,169 @@ function makeSleepZzz(): SVGGElement {
   return wrap
 }
 
-function runSleepingAnim(svg: SVGElement): () => void {
+// ---- shared rAF ticker -----------------------------------------------------
+// One module-level requestAnimationFrame loop drives every active picto, instead
+// of N self-rescheduling loops. Each Entry keeps its OWN lazily-seeded start, so
+// the per-target per-frame transform value is byte-identical to the old per-loop
+// `if (!start) start = ts` behaviour. A single IntersectionObserver toggles
+// `e.visible` to gate only the per-frame style WRITE (the clock always advances),
+// and will-change is bound to actively-animating, on-screen targets.
+interface Entry {
+  /** The host <span> we observe for visibility. */
+  host: Element
+  /** The animated target group (.char or .eyes). */
+  target: SVGElement
+  /** The owning <svg> root, so every exit path can clear the AA shape-rendering override. */
+  svg?: SVGElement
+  isSleeping: boolean
+  /** Sleeping only: the three zzz groups (tweened) and the eyes group (static pose). */
+  zzzGroups?: SVGGElement[]
+  eyes?: SVGElement
+  /** Non-sleeping only. */
+  dur?: number
+  loop?: boolean
+  f?: (p: number) => string
+  /** 0 = unseeded; set to the first ts this entry is processed. */
+  start: number
+  visible: boolean
+  done: boolean
+}
+
+const ENTRIES = new Set<Entry>()
+let rafId = 0
+
+// host span -> its active entries (a host has at most one active entry given
+// stopRef, but an array keeps unregister robust).
+const IO_TARGETS = new WeakMap<Element, Entry[]>()
+
+const io =
+  typeof IntersectionObserver !== 'undefined'
+    ? new IntersectionObserver(
+        (records) => {
+          for (const rec of records) {
+            const list = IO_TARGETS.get(rec.target)
+            if (!list) continue
+            for (const e of list) {
+              e.visible = rec.isIntersecting
+              // Bound will-change to on-screen, actively-animating targets.
+              setWillChange(e, e.visible ? 'transform' : '')
+            }
+          }
+        },
+        { rootMargin: '200px' },
+      )
+    : null
+
+function setWillChange(e: Entry, v: string): void {
+  e.target.style.willChange = v
+  if (e.isSleeping) {
+    if (e.eyes) e.eyes.style.willChange = v
+    if (e.zzzGroups) for (const z of e.zzzGroups) z.style.willChange = v
+  }
+}
+
+function register(e: Entry): () => void {
+  ENTRIES.add(e)
+  // Default visible=true so pre-observer frames render (identical to today, which
+  // always writes). Promote the layer immediately; the observer demotes off-screen.
+  setWillChange(e, 'transform')
+  if (io) {
+    const list = IO_TARGETS.get(e.host)
+    if (list) list.push(e)
+    else {
+      IO_TARGETS.set(e.host, [e])
+      io.observe(e.host)
+    }
+  }
+  ensureRunning()
+  return () => unregister(e)
+}
+
+function unregister(e: Entry): void {
+  if (!ENTRIES.delete(e)) return
+  if (io) {
+    const list = IO_TARGETS.get(e.host)
+    if (list) {
+      const i = list.indexOf(e)
+      if (i >= 0) list.splice(i, 1)
+      if (list.length === 0) {
+        IO_TARGETS.delete(e.host)
+        io.unobserve(e.host)
+      }
+    }
+  }
+}
+
+function tick(ts: number): void {
+  for (const e of ENTRIES) stepEntry(e, ts)
+  rafId = ENTRIES.size ? requestAnimationFrame(tick) : 0
+}
+
+function ensureRunning(): void {
+  if (!rafId && ENTRIES.size) rafId = requestAnimationFrame(tick)
+}
+
+function stepEntry(e: Entry, ts: number): void {
+  if (e.isSleeping) {
+    const eyes = e.eyes as SVGElement
+    const zs = e.zzzGroups as SVGGElement[]
+    if (!e.target.isConnected || !eyes.isConnected || !zs[0]?.isConnected) {
+      unregister(e)
+      resetSleeping(e)
+      return
+    }
+    if (!e.start) e.start = ts
+    const p = ((ts - e.start) / 2800) % 1
+    const breath = Math.sin(TAU * p)
+    if (e.visible) {
+      e.target.style.transform = `scaleY(${1 + 0.025 * breath}) scaleX(${1 - 0.012 * breath})`
+      for (let i = 0; i < zs.length; i++) {
+        const y = Math.sin(TAU * p + i * 0.85) * 1.6
+        zs[i].style.transform = `translateY(${y}px)`
+      }
+    }
+    return
+  }
+
+  if (!e.target.isConnected) {
+    unregister(e)
+    resetNonSleeping(e)
+    return
+  }
+  if (!e.start) e.start = ts
+  const el = (ts - e.start) / (e.dur as number)
+  const p = e.loop ? el % 1 : Math.min(1, el)
+  if (e.visible) e.target.style.transform = (e.f as (p: number) => string)(p)
+  // Non-loop completion: the terminal '' clear MUST run regardless of visibility,
+  // so a one-shot that finished off-screen is never stuck mid-pose.
+  if (!e.loop && el >= 1) {
+    e.target.style.transform = ''
+    e.target.style.willChange = ''
+    e.svg && (e.svg.style.shapeRendering = '')
+    unregister(e)
+  }
+}
+
+function resetNonSleeping(e: Entry): void {
+  e.target.style.transform = ''
+  e.target.style.willChange = ''
+  e.svg && (e.svg.style.shapeRendering = '')
+}
+
+function resetSleeping(e: Entry): void {
+  e.target.style.transform = ''
+  e.target.style.willChange = ''
+  if (e.eyes) {
+    e.eyes.style.transform = ''
+    e.eyes.style.willChange = ''
+  }
+  if (e.zzzGroups) {
+    for (const z of e.zzzGroups) z.remove()
+  }
+  e.svg && (e.svg.style.shapeRendering = '')
+}
+
+function runSleepingAnim(svg: SVGElement, host: Element): () => void {
   const char = svg.querySelector<SVGElement>('.char')
   const eyes = svg.querySelector<SVGElement>('.eyes')
   if (!char || !eyes) return () => {}
@@ -97,39 +258,36 @@ function runSleepingAnim(svg: SVGElement): () => void {
   const zzz = makeSleepZzz()
   svg.appendChild(zzz)
   svg.style.overflow = 'visible'
+  svg.style.shapeRendering = 'geometricPrecision'
 
   char.style.transformBox = 'fill-box'
   char.style.transformOrigin = '50% 100%'
-  char.style.willChange = 'transform'
   eyes.style.transformBox = 'fill-box'
   eyes.style.transformOrigin = 'center'
-  eyes.style.willChange = 'transform'
   eyes.style.transform = 'scaleY(0.08)'
 
   const zs = Array.from(zzz.children) as SVGGElement[]
-  let raf = 0
-  let start = 0
-  const step = (ts: number) => {
-    if (!char.isConnected || !eyes.isConnected || !zzz.isConnected) return
-    if (!start) start = ts
-    const p = ((ts - start) / 2800) % 1
-    const breath = Math.sin(TAU * p)
-    char.style.transform = `scaleY(${1 + 0.025 * breath}) scaleX(${1 - 0.012 * breath})`
-
-    for (let i = 0; i < zs.length; i++) {
-      const y = Math.sin(TAU * p + i * 0.85) * 1.6
-      zs[i].style.transform = `translateY(${y}px)`
-    }
-
-    raf = requestAnimationFrame(step)
+  const entry: Entry = {
+    host,
+    target: char,
+    svg,
+    isSleeping: true,
+    zzzGroups: zs,
+    eyes,
+    start: 0,
+    visible: true,
+    done: false,
   }
-  raf = requestAnimationFrame(step)
+  const off = register(entry)
 
   return () => {
-    cancelAnimationFrame(raf)
+    off()
     char.style.transform = ''
+    char.style.willChange = ''
     eyes.style.transform = ''
+    eyes.style.willChange = ''
     zzz.remove()
+    svg.style.shapeRendering = ''
   }
 }
 
@@ -141,35 +299,38 @@ function usePictoUid(): string {
   return 'p' + id.replace(/[^a-zA-Z0-9_-]/g, '') + '_'
 }
 
-// rAF tween on the .char / .eyes group. Returns a stop() that resets the transform.
-function runAnim(svg: SVGElement, name: AnimName): () => void {
-  if (name === 'sleeping') return runSleepingAnim(svg)
+// Registers a tween on the .char / .eyes group with the shared ticker.
+// Returns a stop() that unregisters and resets the transform.
+function runAnim(svg: SVGElement, name: AnimName, host: Element): () => void {
+  if (name === 'sleeping') return runSleepingAnim(svg, host)
 
   const a = ANIMS[name]
   const target = svg.querySelector<SVGElement>('.' + a.target)
   if (!target) return () => {}
   svg.style.overflow = 'visible'
+  svg.style.shapeRendering = 'geometricPrecision'
   target.style.transformBox = 'fill-box'
   target.style.transformOrigin = a.target === 'char' ? '50% 100%' : 'center'
-  target.style.willChange = 'transform'
-  let raf = 0
-  let start = 0
-  const step = (ts: number) => {
-    if (!target.isConnected) return // svg was replaced/unmounted — drop the loop
-    if (!start) start = ts
-    const el = (ts - start) / a.dur
-    const p = a.loop ? el % 1 : Math.min(1, el)
-    target.style.transform = a.f(p)
-    if (!a.loop && el >= 1) {
-      target.style.transform = ''
-      return
-    }
-    raf = requestAnimationFrame(step)
+
+  const entry: Entry = {
+    host,
+    target,
+    svg,
+    isSleeping: false,
+    dur: a.dur,
+    loop: a.loop,
+    f: a.f,
+    start: 0,
+    visible: true,
+    done: false,
   }
-  raf = requestAnimationFrame(step)
+  const off = register(entry)
+
   return () => {
-    cancelAnimationFrame(raf)
+    off()
     target.style.transform = ''
+    target.style.willChange = ''
+    svg.style.shapeRendering = ''
   }
 }
 
@@ -186,10 +347,15 @@ export interface PictoProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 
   background?: boolean
   /** Play an animation declaratively. */
   animate?: AnimName
+  /**
+   * Render style. 'fancy' (default) = filtered, gradient body — byte-identical to
+   * prior output. 'flat' = no-filter, no-gradient, solid-fill (cheap to paint at scale).
+   */
+  variant?: Variant
 }
 
 export const Picto = React.forwardRef<HTMLSpanElement, PictoProps>(function Picto(
-  { char, seed, config, size = 120, background = false, animate, style, ...rest },
+  { char, seed, config, size = 120, background = false, animate, variant = 'fancy', style, ...rest },
   ref,
 ) {
   // React 18+ uses useId for SSR-safe IDs; React 17 falls back to a client-stable id.
@@ -201,7 +367,10 @@ export const Picto = React.forwardRef<HTMLSpanElement, PictoProps>(function Pict
     return new Character(seed ?? 0)
   }, [char, config, seed])
 
-  const html = React.useMemo(() => character.svg({ background, uid }), [character, background, uid])
+  const html = React.useMemo(
+    () => character.svg({ background, uid, variant }),
+    [character, background, uid, variant],
+  )
 
   const hostRef = React.useRef<HTMLSpanElement>(null)
   React.useImperativeHandle(ref, () => hostRef.current as HTMLSpanElement, [])
@@ -210,8 +379,9 @@ export const Picto = React.forwardRef<HTMLSpanElement, PictoProps>(function Pict
   const play = React.useCallback((name: AnimName | null) => {
     stopRef.current?.()
     stopRef.current = null
-    const svg = hostRef.current?.querySelector('svg') as SVGElement | null
-    if (svg && name) stopRef.current = runAnim(svg, name)
+    const host = hostRef.current
+    const svg = host?.querySelector('svg') as SVGElement | null
+    if (host && svg && name) stopRef.current = runAnim(svg, name, host)
   }, [])
 
   // imperative: char.blink() / char.dance() / char.stop()

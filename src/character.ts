@@ -3,7 +3,7 @@
 
 import { compose, resolve } from './engine'
 import { hashSeed } from './rng'
-import type { CharInput, Resolved } from './engine'
+import type { CharInput, Resolved, Variant } from './engine'
 
 export type AnimName = 'blink' | 'jump' | 'breath' | 'dance' | 'sleeping'
 
@@ -18,6 +18,11 @@ export interface SvgOptions {
   background?: boolean
   /** Id prefix to keep filters/gradients unique across SVGs in one document. */
   uid?: string
+  /**
+   * Render style (default 'fancy'). 'flat' drops filters + the body gradient for
+   * cheaper paint — use it when rendering large grids that must stay smooth.
+   */
+  variant?: Variant
 }
 
 function safeUid(uid: string): string {
@@ -39,7 +44,7 @@ export class Character {
   /** Render this character to a standalone SVG string. */
   svg(opts: SvgOptions = {}): string {
     const c = this.config
-    const { background = false } = opts
+    const { background = false, variant = 'fancy' } = opts
     const uid = safeUid(opts.uid ?? this._uid)
     return compose({
       light: c.light,
@@ -52,6 +57,7 @@ export class Character {
       tuning: c.tuning,
       uid,
       background,
+      variant,
     })
   }
 

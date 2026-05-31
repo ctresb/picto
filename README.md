@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.0-ff69b4" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.1.1-ff69b4" alt="version" />
   <img src="https://img.shields.io/badge/TypeScript-ready-3178c6?logo=typescript&logoColor=white" alt="typescript" />
   <img src="https://img.shields.io/badge/React-%E2%89%A5%2017-61dafb?logo=react&logoColor=white" alt="react" />
   <img src="https://img.shields.io/badge/runtime%20deps-0-22c55e" alt="zero deps" />

@@ -4,6 +4,7 @@
 
 import { PARTS } from './parts'
 import { anchorOf, arc, hexToOklch, oklchToHex, stopsOf } from './color'
+import type { Anchor } from './color'
 import { hashSeed, mulberry32 } from './rng'
 
 // ---------------- catalog (derived from the bundled parts) ----------------
@@ -31,6 +32,19 @@ export const BROW_FILES = byPrefix(PARTS.eyebrows)
 /** Eye kinds that have both eyes and matching eyebrows: "single" | "double" | "triple". */
 export const PREFIXES = Object.keys(EYE_FILES).filter((p) => BROW_FILES[p]).sort()
 
+// Body anchors (COLORS x SHAPES[0]) are a pure function of the constant body SVG
+// strings, but were recomputed in four hot paths. Memoize per body-part key.
+const ANCHOR_CACHE = new Map<string, Anchor>()
+function anchorFor(color: string): Anchor {
+  const key = color + '_' + SHAPES[0]
+  let a = ANCHOR_CACHE.get(key)
+  if (!a) {
+    a = anchorOf(PARTS.bodies[key])
+    ANCHOR_CACHE.set(key, a)
+  }
+  return a
+}
+
 // ---------------- palette (anchors + generated hues) ----------------
 
 export interface PalEntry {
@@ -42,8 +56,10 @@ export interface PalEntry {
 
 // The artist anchors plus `extra` hues interpolated into the widest hue gaps,
 // so generated colors still read as hand-tuned.
-export function buildPalette(selColors: string[], extra: number): PalEntry[] {
-  const anchors = selColors.map((c) => ({ name: c, ...anchorOf(PARTS.bodies[c + '_' + SHAPES[0]]) }))
+// Pure over (selColors, extra) given the constant PARTS/SHAPES, so the public
+// entry point memoizes the whole result by its full input (see below).
+function computePalette(selColors: string[], extra: number): PalEntry[] {
+  const anchors = selColors.map((c) => ({ name: c, ...anchorFor(c) }))
   const pal: PalEntry[] = anchors.map((a) => ({ name: a.name, light: a.light, dark: a.dark, gen: false }))
   if (anchors.length >= 2 && extra > 0) {
     const ring = [...anchors].sort((a, b) => a.p[2] - b.p[2])
@@ -81,12 +97,30 @@ export function buildPalette(selColors: string[], extra: number): PalEntry[] {
   return pal
 }
 
+// Memoize buildPalette by its full input. COLORS is a frozen constant and
+// genHues defaults to 8, so default constructions hit after the first.
+// Returned PalEntry[] is read-only downstream (pick(palette) only reads
+// .name/.light/.dark/.gen), so sharing the same array reference is safe.
+const PALETTE_CACHE = new Map<string, PalEntry[]>()
+export function buildPalette(selColors: string[], extra: number): PalEntry[] {
+  const key = selColors.join(',') + '|' + extra
+  let p = PALETTE_CACHE.get(key)
+  if (!p) {
+    p = computePalette(selColors, extra)
+    PALETTE_CACHE.set(key, p)
+  }
+  return p
+}
+
 // Interpolate a single arbitrary hue (deg) into the anchor envelope -> {light, dark}.
+// Memoized by the normalized hue (mirrors the internal normalization), so two raw
+// hues that normalize equal share a result — identical to today's behavior.
+const HUE_CACHE = new Map<number, { light: string; dark: string }>()
 function hueEntry(hue: number): { light: string; dark: string } {
-  const anchors = COLORS.map((c) => ({ name: c, ...anchorOf(PARTS.bodies[c + '_' + SHAPES[0]]) })).sort(
-    (a, b) => a.p[2] - b.p[2],
-  )
   hue = ((hue % 360) + 360) % 360
+  let r = HUE_CACHE.get(hue)
+  if (r) return r
+  const anchors = COLORS.map((c) => ({ name: c, ...anchorFor(c) })).sort((a, b) => a.p[2] - b.p[2])
   for (let i = 0; i < anchors.length; i++) {
     const a = anchors[i]
     const b = anchors[(i + 1) % anchors.length]
@@ -100,11 +134,15 @@ function hueEntry(hue: number): { light: string; dark: string } {
       const dL = a.p[3] + (b.p[3] - a.p[3]) * t
       const dC = a.p[4] + (b.p[4] - a.p[4]) * t
       const dH = a.p[5] + arc(b.p[5] - a.p[5]) * t
-      return { light: oklchToHex(L, C, hue), dark: oklchToHex(L + dL, Math.max(0, C + dC), hue + dH) }
+      r = { light: oklchToHex(L, C, hue), dark: oklchToHex(L + dL, Math.max(0, C + dC), hue + dH) }
+      HUE_CACHE.set(hue, r)
+      return r
     }
   }
   const a = anchors[0]
-  return { light: a.light, dark: a.dark }
+  r = { light: a.light, dark: a.dark }
+  HUE_CACHE.set(hue, r)
+  return r
 }
 
 // ---------------- recolor / compose ----------------
@@ -118,10 +156,24 @@ function nsIds(svg: string, pfx: string): string {
 }
 const innerSVG = (svg: string) => svg.replace(/^\s*<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
 
+// The lightest (L) / darkest (D) source stops depend only on the source SVG
+// string (a constant per shape), so cache that detection. The actual substitution
+// still runs every call with the live target light/dark.
+const LD_CACHE = new Map<string, { L: string; D: string }>()
+function bodyLD(shapeSvg: string): { L: string; D: string } {
+  let r = LD_CACHE.get(shapeSvg)
+  if (!r) {
+    const st = stopsOf(shapeSvg)
+    const L = st.reduce((a, b) => (hexToOklch(b)[0] > hexToOklch(a)[0] ? b : a))
+    const D = st.reduce((a, b) => (hexToOklch(b)[0] < hexToOklch(a)[0] ? b : a))
+    r = { L, D }
+    LD_CACHE.set(shapeSvg, r)
+  }
+  return r
+}
+
 function recolorBody(shapeSvg: string, light: string, dark: string): string {
-  const st = stopsOf(shapeSvg)
-  const L = st.reduce((a, b) => (hexToOklch(b)[0] > hexToOklch(a)[0] ? b : a))
-  const D = st.reduce((a, b) => (hexToOklch(b)[0] < hexToOklch(a)[0] ? b : a))
+  const { L, D } = bodyLD(shapeSvg)
   return shapeSvg
     .split(`stop-color="${L}"`)
     .join(`stop-color="${light}"`)
@@ -175,6 +227,11 @@ function recolorEyes(svg: string, k: number, mode: string, bodyH: number, feat: 
 
 const recolorBrows = (svg: string, feat: string) => svg.split('fill="#2F282B"').join(`fill="${feat}"`)
 
+/** Render style. 'fancy' = full filters + body gradient (default, the original
+ * look). 'flat' = no filters, no gradients, solid fills only — far cheaper to
+ * paint, so large grids stay smooth while scrolling. */
+export type Variant = 'flat' | 'fancy'
+
 export interface ComposeArgs {
   light: string
   dark: string
@@ -186,7 +243,46 @@ export interface ComposeArgs {
   tuning: Tuning
   uid: string
   background: boolean
+  variant: Variant
 }
+
+// Post-process a fully-composed fancy SVG string into its flat equivalent:
+// strip ONLY the BODY gradient + BODY inner-shadow filter — the dominant
+// per-paint raster cost — and KEEP the per-pupil eye inner-shadow (e_filter)
+// untouched, leaving the body as a solid fill. Body vs eye are distinguished by
+// the verified b_ / paint0_radial (body-only) vs e_ (eye-only) id namespacing.
+// Running this on the final string keeps every fancy fragment cache and the
+// per-uid nsIds untouched (so fancy stays byte-identical), and the surviving
+// namespaced background clip id stays correct. Deterministic, validated against
+// real compose() output (0 tag-balance issues; body filter/gradient defs+refs
+// gone; e_filter eye-shadow refs/defs + bg clipPath preserved). `light` is the
+// gradient's lightest stop, so the flat body equals the lightest fancy body pixel.
+function flatten(s: string, light: string): string {
+  // 1) drop the body <g>'s filter= attr ONLY (leading \s* eats the space). Eye
+  //    pupil filter= attrs (e_filter) are left intact.
+  s = s.replace(/\s*filter="url\(#[^"]*b_filter[^"]*\)"/g, '')
+  // 2) body radial gradient ref -> solid light (paint0_radial is body-only).
+  s = s.replace(/fill="url\(#[^"]*paint0_radial_[^"]*\)"/g, `fill="${light}"`)
+  // 3) remove the body inner-shadow <filter> def ONLY (matched by its b_filter id);
+  //    the two e_filter pupil <filter> defs survive.
+  s = s.replace(/<filter\b[^>]*\bid="[^"]*b_filter[^"]*"[\s\S]*?<\/filter>/g, '')
+  // 4) remove the body radialGradient def ONLY.
+  s = s.replace(/<radialGradient\b[^>]*\bid="[^"]*paint0_radial_[^"]*"[\s\S]*?<\/radialGradient>/g, '')
+  // 5) drop a now-empty body <defs>; the bg clipPath <defs> and the eye-filter
+  //    <defs> are non-empty so they are preserved.
+  s = s.replace(/<defs>\s*<\/defs>/g, '')
+  return s
+}
+
+// uid-INDEPENDENT recolored inner fragments. The expensive recolor + innerSVG
+// work is a pure function of the keyed inputs; only the per-uid id-namespacing
+// (nsIds) varies, so it runs per call AFTER the cache lookup. Folding innerSVG
+// into the cache is safe: the part root <svg> tag carries no id=/url(# tokens
+// (verified), so nsIds never touches what innerSVG strips.
+const BODY_FRAG = new Map<string, string>()
+const EYES_FRAG = new Map<string, string>()
+const BROW_FRAG = new Map<string, string>()
+const BG_FRAG = new Map<string, string>()
 
 // Assemble background + recolored body/eyes/brows into one <svg> string.
 // The animatable groups are .char (body+eyes+brows) and .eyes (just the eyes).
@@ -194,14 +290,48 @@ export function compose(a: ComposeArgs): string {
   const bodyH = hexToOklch(a.light)[2]
   const feat = featureDark(hexToOklch(a.dark)[2], a.tuning)
   const k = PUPILS[a.eye.split('_')[0]]
-  const body = innerSVG(nsIds(recolorBody(PARTS.bodies[COLORS[0] + '_' + a.shape], a.light, a.dark), a.uid + 'b_'))
-  const eyes = innerSVG(nsIds(recolorEyes(PARTS.eyes[a.eye], k, a.mode, bodyH, feat, a.tuning), a.uid + 'e_'))
-  const wb = innerSVG(nsIds(recolorBrows(PARTS.eyebrows[a.brow], feat), a.uid + 'w_'))
-  const back = a.background ? innerSVG(nsIds(PARTS.backgrounds[a.bg], a.uid + 'g_')) : ''
-  return (
+
+  const bodyKey = `${a.shape}|${a.light}|${a.dark}`
+  let bodyFrag = BODY_FRAG.get(bodyKey)
+  if (bodyFrag === undefined) {
+    bodyFrag = innerSVG(recolorBody(PARTS.bodies[COLORS[0] + '_' + a.shape], a.light, a.dark))
+    BODY_FRAG.set(bodyKey, bodyFrag)
+  }
+
+  // bodyH (exact float) and feat (exact hex) fully determine recolorEyes given eye/mode;
+  // k is derived from eye so it is covered by eye.
+  const eyesKey = `${a.eye}|${a.mode}|${bodyH}|${feat}|${a.tuning.litL}|${a.tuning.pupC}`
+  let eyesFrag = EYES_FRAG.get(eyesKey)
+  if (eyesFrag === undefined) {
+    eyesFrag = innerSVG(recolorEyes(PARTS.eyes[a.eye], k, a.mode, bodyH, feat, a.tuning))
+    EYES_FRAG.set(eyesKey, eyesFrag)
+  }
+
+  const browKey = `${a.brow}|${feat}`
+  let browFrag = BROW_FRAG.get(browKey)
+  if (browFrag === undefined) {
+    browFrag = innerSVG(recolorBrows(PARTS.eyebrows[a.brow], feat))
+    BROW_FRAG.set(browKey, browFrag)
+  }
+
+  const body = nsIds(bodyFrag, a.uid + 'b_')
+  const eyes = nsIds(eyesFrag, a.uid + 'e_')
+  const wb = nsIds(browFrag, a.uid + 'w_')
+
+  let back = ''
+  if (a.background) {
+    let bgFrag = BG_FRAG.get(a.bg)
+    if (bgFrag === undefined) {
+      bgFrag = innerSVG(PARTS.backgrounds[a.bg])
+      BG_FRAG.set(a.bg, bgFrag)
+    }
+    back = nsIds(bgFrag, a.uid + 'g_')
+  }
+  const svg =
     `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">` +
     `${back}<g class="char">${body}<g class="eyes">${eyes}</g>${wb}</g></svg>`
-  )
+  if (a.variant === 'flat') return flatten(svg, a.light)
+  return svg
 }
 
 // ---------------- config + resolution ----------------
@@ -274,19 +404,26 @@ const normalizeHex = (s: string): string | null => (isHex(s) ? (s[0] === '#' ? s
 
 // The anchor whose hue is closest to H, for borrowing a tasteful light->dark delta.
 function nearestAnchorByHue(H: number) {
-  return COLORS.map((c) => anchorOf(PARTS.bodies[c + '_' + SHAPES[0]])).reduce((m, x) =>
+  return COLORS.map((c) => anchorFor(c)).reduce((m, x) =>
     Math.abs(arc(x.p[2] - H)) < Math.abs(arc(m.p[2] - H)) ? x : m,
   )
 }
 
 // Turn one brand hex into a {light, dark} gradient: the hex is the light stop, the
 // dark stop borrows the lightness/chroma/hue drop of the nearest artist color.
+// Memoized by the normalized lowercased hex (the only varying input given the
+// constant anchors), so repeated color:'#hex' constructions reuse the result.
+const GRAD_CACHE = new Map<string, { light: string; dark: string }>()
 function deriveGradient(hex: string): { light: string; dark: string } {
   const light = normalizeHex(hex)
   if (!light) throw new TypeError('picto.gradient(...) expects a 6-digit hex color.')
+  let r = GRAD_CACHE.get(light)
+  if (r) return r
   const [L, C, H] = hexToOklch(light)
   const a = nearestAnchorByHue(H)
-  return { light, dark: oklchToHex(L + a.p[3], Math.max(0, C + a.p[4]), H + a.p[5]) }
+  r = { light, dark: oklchToHex(L + a.p[3], Math.max(0, C + a.p[4]), H + a.p[5]) }
+  GRAD_CACHE.set(light, r)
+  return r
 }
 
 /**
@@ -357,7 +494,7 @@ export function resolve(input: CharInput): Resolved {
       dark = g.dark
       colorName = 'custom'
     } else if (PARTS.bodies[c + '_' + SHAPES[0]]) {
-      const a = anchorOf(PARTS.bodies[c + '_' + SHAPES[0]])
+      const a = anchorFor(c)
       light = a.light
       dark = a.dark
       colorName = c
